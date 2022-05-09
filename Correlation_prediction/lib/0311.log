@@ -1,0 +1,125 @@
+Basedate--(line,cloum): (1460, 81)
+              nan Amount  Percentage
+PoolQC              2909   99.657417
+MiscFeature         2814   96.402878
+Alley               2721   93.216855
+Fence               2348   80.438506
+FireplaceQu         1420   48.646797
+LotFrontage          486   16.649538
+GarageFinish         159    5.447071
+GarageQual           159    5.447071
+GarageCond           159    5.447071
+GarageYrBlt          159    5.447071
+GarageType           157    5.378554
+BsmtExposure          82    2.809181
+BsmtCond              82    2.809181
+BsmtQual              81    2.774923
+BsmtFinType2          80    2.740665
+BsmtFinType1          79    2.706406
+MasVnrType            24    0.822199
+MasVnrArea            23    0.787941
+MSZoning               4    0.137033
+BsmtFullBath           2    0.068517
+BsmtHalfBath           2    0.068517
+Functional             2    0.068517
+Utilities              2    0.068517
+GarageArea             1    0.034258
+GarageCars             1    0.034258
+Electrical             1    0.034258
+KitchenQual            1    0.034258
+TotalBsmtSF            1    0.034258
+BsmtUnfSF              1    0.034258
+BsmtFinSF2             1    0.034258
+BsmtFinSF1             1    0.034258
+Exterior2nd            1    0.034258
+Exterior1st            1    0.034258
+SaleType               1    0.034258
+None
+            nan Amount  Percentage
+GarageCars           1    0.034258
+GarageArea           1    0.034258
+None
+Empty DataFrame
+Columns: [nan Amount, Percentage]
+Index: []
+Empty DataFrame
+Columns: [nan Amount, Percentage]
+Index: []
+Empty DataFrame
+Columns: [nan Amount, Percentage]
+Index: []
+Fix all missing_data @@@@@@@@
+
+len(y): 1460
+(1460, 302)
+(1459, 302)
+0.8356900246329687
+2022-03-11 11:21:41.478570
+Start adapt parameters...
+
+Best: -0.019263 using {'n_estimators': 350}
+-0.019293 (0.005376) with: {'n_estimators': 50}
+-0.019266 (0.005351) with: {'n_estimators': 200}
+-0.019263 (0.005352) with: {'n_estimators': 350}
+-0.019263 (0.005352) with: {'n_estimators': 500}
+-0.019263 (0.005352) with: {'n_estimators': 650}
+2022-03-11 11:26:05.977972 ---------------------------------------1
+
+Best: -0.016800 using {'learning_rate': 0.09}
+-132.963202 (0.680712) with: {'learning_rate': 0.0}
+-0.335076 (0.016139) with: {'learning_rate': 0.03}
+-0.018456 (0.004702) with: {'learning_rate': 0.06}
+-0.016800 (0.004841) with: {'learning_rate': 0.09}
+-0.017124 (0.005614) with: {'learning_rate': 0.12}
+-0.016894 (0.005058) with: {'learning_rate': 0.15}
+-0.016981 (0.004403) with: {'learning_rate': 0.18}
+2022-03-11 11:28:18.249533 ---------------------------------------2
+
+Best: -0.016290 using {'max_depth': 3}
+-0.159657 (0.022202) with: {'max_depth': 0}
+-0.018783 (0.005598) with: {'max_depth': 1}
+-0.016455 (0.004358) with: {'max_depth': 2}
+-0.016290 (0.004943) with: {'max_depth': 3}
+-0.017733 (0.005746) with: {'max_depth': 4}
+-0.018543 (0.005293) with: {'max_depth': 5}
+-0.019283 (0.005366) with: {'max_depth': 6}
+2022-03-11 11:29:53.424350 ---------------------------------------3
+
+Best: -0.018095 using {'min_child_weight': 1.1}
+-0.019283 (0.005366) with: {'min_child_weight': 0.5}
+-0.019283 (0.005366) with: {'min_child_weight': 0.8}
+-0.018095 (0.003078) with: {'min_child_weight': 1.1}
+-0.018095 (0.003078) with: {'min_child_weight': 1.4000000000000001}
+-0.018095 (0.003078) with: {'min_child_weight': 1.7000000000000002}
+2022-03-11 11:31:45.407856 ---------------------------------------4
+
+Best: -0.019140 using {'gamma': 0.004}
+-0.019772 (0.006092) with: {'gamma': 0.001}
+-0.019140 (0.006104) with: {'gamma': 0.004}
+-0.019809 (0.006028) with: {'gamma': 0.007}
+-0.019286 (0.006319) with: {'gamma': 0.010000000000000002}
+2022-03-11 11:33:14.753805 ---------------------------------------5
+
+Best: -0.019069 using {'subsample': 0.9000000000000001}
+-0.026093 (0.004985) with: {'subsample': 0.3}
+-0.020236 (0.004306) with: {'subsample': 0.5}
+-0.021912 (0.006591) with: {'subsample': 0.7}
+-0.019069 (0.006389) with: {'subsample': 0.9000000000000001}
+2022-03-11 11:34:56.242789 ---------------------------------------6
+
+Best: -0.017552 using {'colsample_bytree': 0.7999999999999999}
+-0.018755 (0.004759) with: {'colsample_bytree': 0.6}
+-0.018163 (0.004505) with: {'colsample_bytree': 0.7}
+-0.017552 (0.004095) with: {'colsample_bytree': 0.7999999999999999}
+-0.018119 (0.004981) with: {'colsample_bytree': 0.8999999999999999}
+2022-03-11 11:36:10.550546 ---------------------------------------7
+
+Finish adapt all 7 params...
+
+2022-03-11 11:48:53.403909
+best_score: -0.016113604366189076
+best_parameters: {'colsample_bytree': 0.6, 'gamma': 0.004, 'learning_rate': 0.15, 'max_depth': 3, 'min_child_weight': 1.1, 'n_estimators': 1000, 'reg_alpha': 0.75, 'reg_lambda': 0.45, 'seed': 42, 'subsample': 1}
+accuracies.mean: -0.0149430999471211
+Save predict result to sample_submission.csv...
+Saved!
+Will show all figures in the end
