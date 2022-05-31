@@ -2,11 +2,12 @@
 import pandas as pd
 import numpy as np
 
-def remove_Outranges(list):
+def remove_Outranges(list, silenceMode=True):
     while True:
         ser1=list_to_ser(list)
         outrange=three_sigma(ser1)
-        print("outrange:",outrange)
+        if not silenceMode:
+            print("outrange:",outrange)
         if len(outrange) != 0:
             list.remove(max(outrange))
             print("删除一个异常值：",max(outrange))

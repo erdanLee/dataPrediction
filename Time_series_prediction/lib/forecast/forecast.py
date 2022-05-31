@@ -1,17 +1,23 @@
 # coding=utf-8
 
-# test push
-
 # 主程序需要用到的库
 from scipy.fftpack import fft, ifft
 import math
-from scipy import signal, stats
+from scipy import signal
 import numpy as np
 from statsmodels.tsa.seasonal import seasonal_decompose, STL, DecomposeResult
 import pandas as pd
 import matplotlib.pyplot as plt
 import sys
+import os
 import time
+
+# 调用同级包
+currentUrl = os.path.dirname(__file__)
+parentUrl = os.path.abspath(os.path.join(currentUrl, os.pardir))
+sys.path.append(parentUrl)
+import handle_exception.handle_exp as handle_exp
+# print(handle_exp.remove_Outranges([1,2,10]))
 
 # 主程序正在尝试使用深度学习方案，这些是用到的库
 import tensorflow.compat.v1 as tf # 教程为tensorflow v1版本，兼容v1函数的workaround
@@ -29,7 +35,7 @@ class TimeSeriesPredictor(object):
         一、在构造函数中需要/可选指定的属性:
 
         timeSeries: pandas.Series对象，numpy.ndarray对象或者列表
-            预测所依据的时间序列。
+            预测所依据的时间序列。程序内部会处理为_relativeTimeSeries以进行计算/绘图
         predictNum: (可选)整数
             默认为给定时间序列长度
 
@@ -39,30 +45,32 @@ class TimeSeriesPredictor(object):
         说明：
             所有预测设置相关属性可由setPredictOptions()函数设置
             这些属性会被预测方法和检验方法使用，并影响预测准确度。
-        __decomposeFunction: 函数对象
+        _decomposeFunction: 函数对象
             时间序列分解函数。可选，默认为stl分解
-        __trendPredictFunction: 函数对象
+        _trendPredictFunction: 函数对象
             趋势预测函数。可选，默认为多项式拟合预测
-        __trendPredictDegree: int
+        _trendPredictDegree: int
             拟合多项式的最高次数。可选，默认为3
 
         2)用户设置相关属性
         说明：
             所有用户设置相关属性都可由setUserOptions()函数设置
             这些属性调整某些用户功能的行为
-        __drawingsAutoDisplay: 布尔型
+        _drawingsAutoDisplay: 布尔型
             按照默认值为True时，调用绘制函数之后立即显示图形窗口；
             或者可以设置为False，并且在在调用所有绘制函数之后使用displayAllDrawings()函数一次性绘制所有图像
-        __saveDrawings: 布尔型
+        _saveDrawings: 布尔型
             按照默认值为False，各个绘制的图像不会被保存为文件
-        __printResult: 布尔型
+        _printResult: 布尔型
             默认值为False。当指定为True时，计算某些数值的同时会打印出结果
 
         三、其他属性:
 
         1)计算步骤的结果
+        _relativeTimeSeries: pandas.Series对象
+            在计算/绘制过程中提供相对的索引信息，来辅助生成预测值的索引
         period: 浮点数/整数
-            解析得到的时间序列的周期。由__extractPeriod()方法得到，并由__roundThePeriod()方法取整
+            解析得到的时间序列的周期。由_extractPeriod()方法得到，并由__roundThePeriod()方法取整
         decomposeResult: statsmodels.tsa.seasonal.DecomposeResult实例
             时间序列分解的结果。包含各个分解部分并且支持直接使用plot()方法绘制分解结果
         trendPredictResult: pandas.Series实例
@@ -79,9 +87,9 @@ class TimeSeriesPredictor(object):
         3)验证过程/结果
         validate_predictor: TimeSeriesPredictor实例
             保存了验证预测过程/结果的TimeSeriesPredictor实例
-        validate_actualSeries: numpy.ndarray对象
+        validate_actualSeries: pandas.Series对象
             验证预测部分对应的真实值。用于验证的准确度计算/验证图像的绘制。
-        validate_ape: numpy.ndarray对象
+        validate_ape: pandas.Series对象
             用于衡量真实值和预测值之间的误差，各点的APE值(绝对百分比误差)。用于MAPE的计算以及APE图像的绘制
         validate_mape: 浮点数
             用于衡量真实值和预测值的误差的MAPE值(平均百分比误差)
@@ -98,7 +106,8 @@ class TimeSeriesPredictor(object):
     ## 内置函数
     def __init__(self, timeSeries, predictNum=0):
         self.timeSeries = timeSeries
-        self.__convertTimeSeriesToNumpyNdarray()
+        self.__initializeTimeSeries()
+        # 默认预测长度为已知部分长度
         if predictNum <= 0:
             predictNum = int(len(self.timeSeries))
         self.predictNum = predictNum
@@ -116,90 +125,90 @@ class TimeSeriesPredictor(object):
 
     ## 预测
     # 预测函数
-    # def predict(self):
-    #     """
-    #     预测时间序列的未来值。函数返回预测结果
-    #     所有预测过程/结果会被保存在实例中
-    #     """
-    #     # 提取周期
-    #     self.__extractPeriod()
-    #     # 分解时间序列
-    #     self.decomposeResult = self.__decomposeFunction(self.timeSeries, self.period)  # type: DecomposeResult
-    #     # 趋势性预测
-    #     self.trendPredictResult = self.__trendPredictFunction(self.decomposeResult.trend, self.predictNum,
-    #                                                           self.__trendPredictDegree)
-    #     # 周期性预测
-    #     self.__seasonalPredict()
-    #     # 整合各部分预测结果
-    #     self.__composeTrendAndSeasonal()
-    #     return self.predictResult.copy()
+    def predict(self):
+        """
+        预测时间序列的未来值。函数返回预测结果
+        所有预测过程/结果会被保存在实例中
+        """
+        # 提取周期
+        self._extractPeriod()
+        # 分解时间序列
+        self.decomposeResult = self._decomposeFunction(self._relativeTimeSeries, self.period)  # type: DecomposeResult
+        # 趋势性预测
+        self.trendPredictResult = self._trendPredictFunction(self.decomposeResult.trend, self.predictNum,
+                                                              self._trendPredictDegree)
+        # 周期性预测
+        self._seasonalPredict()
+        # 整合各部分预测结果
+        self._composeTrendAndSeasonal()
+        return self.predictResult.copy()
 
     # 另一种预测：深度学习预测方案
-    def predict(self, learning_rate=0.1, maxIteration=10000, targetError=0.01):
-        # def predict_ANNs(self):
-        sampleSize = len(self.timeSeries)
-        sampleTimeMat = np.array([range(sampleSize)]).transpose()  # type: np.ndarray
-        print("sampleTime:", sampleTimeMat)
-        sampleValueMat = np.array([self.timeSeries]).transpose()  # type: np.ndarray
-        # 注意：这里无视类属性self.predictNum预测长度，预测长度必须与样本长度一致，否则提取结果时矩阵行数不匹配
-        predictTimeMat = np.array([range(sampleSize, sampleSize+self.predictNum)]).transpose() # type: np.ndarray
-        print("predictTime:", predictTimeMat)
-        predictValueMat = np.array([]) # type: np.ndarray
-        # 归一化
-        sampleTimeMat = (sampleTimeMat - sampleTimeMat.mean()) / (
-                    sampleTimeMat.max() - sampleTimeMat.min())
-        sampleValueMat_mean = sampleValueMat.mean()
-        sampleValueMat_range = sampleValueMat.max() - sampleValueMat.min()
-        sampleValueMat = (sampleValueMat - sampleValueMat_mean) / sampleValueMat_range
-        predictTimeMat = (predictTimeMat - predictTimeMat.mean()) / (
-                    predictTimeMat.max() - predictTimeMat.min())
-        # sampleTimeMat = sampleTimeMat / (
-        #         sampleTimeMat.max() - sampleTimeMat.min())
-        # sampleValueMat_range = sampleValueMat.max() - sampleValueMat.min()
-        # sampleValueMat = sampleValueMat / sampleValueMat_range
-        # predictTimeMat = predictTimeMat / (
-        #         predictTimeMat.max() - predictTimeMat.min())
-        tf.compat.v1.disable_eager_execution()  # 解决placeholder和eager execution不兼容问题
-        x = tf.placeholder(tf.float32, [None, 1])
-        y = tf.placeholder(tf.float32, [None, 1])
-        # 隐藏层
-        w1 = tf.Variable(tf.random_uniform([1, 10], 0, 1))
-        b1 = tf.Variable(tf.zeros([1, 10]))
-        wb1 = tf.matmul(x, w1) + b1
-        layer1 = tf.nn.relu(wb1)
-        # 输出层
-        w2 = tf.Variable(tf.random_uniform([10, 1], 0, 1))
-        b2 = tf.Variable(tf.zeros([sampleSize, 1]))
-        wb2 = tf.matmul(layer1, w2) + b2
-        # layer2 = tf.nn.relu(wb2)
-        layer2 = wb2
-        # 梯度下降
-        loss = tf.reduce_mean(tf.square(y - layer2)) # 方差
-        train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
-        with tf.Session() as session:
-            session.run(tf.global_variables_initializer())
-            iteration = 1
-            error = 1
-            progress = 0
-            # while any([iteration <= maxIteration, error > targetError]):
-            while iteration <= maxIteration:
-                session.run(train_step, feed_dict={x:sampleTimeMat, y:sampleValueMat})
-                # error = tf.sqrt(session.run(loss, feed_dict={x:sampleTimeMat, y:sampleValueMat})) # 由于归一化处理，误差为介于[0, 1]之间的小数
-                currentProgress = round(iteration / maxIteration * 100, 2)
-                if currentProgress != progress:
-                    progress = currentProgress
-                    self.__printInfo("Progress: {:.2f}%".format(progress))
-                iteration += 1
-            print("iteration:", iteration, "\nerror:", error)
-            predictValueMat = session.run(layer2, feed_dict={x:predictTimeMat})
-            predictValueMat = predictValueMat * sampleValueMat_range + sampleValueMat_mean
-            # predictValueMat = predictValueMat * sampleValueMat_range
-        self.predictResult = predictValueMat.transpose()[0]
-        return self.predictResult.copy()
+    # def predict(self, learning_rate=0.1, maxIteration=10000, targetError=0.01):
+    #     # def predict_ANNs(self):
+    #     sampleSize = len(self._relativeTimeSeries)
+    #     sampleTimeMat = np.array([range(sampleSize)]).transpose()  # type: np.ndarray
+    #     print("sampleTime:", sampleTimeMat)
+    #     sampleValueMat = np.array([self._relativeTimeSeries]).transpose()  # type: np.ndarray
+    #     # 注意：这里无视类属性self.predictNum预测长度，预测长度必须与样本长度一致，否则提取结果时矩阵行数不匹配
+    #     predictTimeMat = np.array([range(sampleSize, sampleSize+self.predictNum)]).transpose() # type: np.ndarray
+    #     print("predictTime:", predictTimeMat)
+    #     predictValueMat = np.array([]) # type: np.ndarray
+    #     # 归一化
+    #     sampleTimeMat = (sampleTimeMat - sampleTimeMat.mean()) / (
+    #                 sampleTimeMat.max() - sampleTimeMat.min())
+    #     sampleValueMat_mean = sampleValueMat.mean()
+    #     sampleValueMat_range = sampleValueMat.max() - sampleValueMat.min()
+    #     sampleValueMat = (sampleValueMat - sampleValueMat_mean) / sampleValueMat_range
+    #     predictTimeMat = (predictTimeMat - predictTimeMat.mean()) / (
+    #                 predictTimeMat.max() - predictTimeMat.min())
+    #     # sampleTimeMat = sampleTimeMat / (
+    #     #         sampleTimeMat.max() - sampleTimeMat.min())
+    #     # sampleValueMat_range = sampleValueMat.max() - sampleValueMat.min()
+    #     # sampleValueMat = sampleValueMat / sampleValueMat_range
+    #     # predictTimeMat = predictTimeMat / (
+    #     #         predictTimeMat.max() - predictTimeMat.min())
+    #     tf.compat.v1.disable_eager_execution()  # 解决placeholder和eager execution不兼容问题
+    #     x = tf.placeholder(tf.float32, [None, 1])
+    #     y = tf.placeholder(tf.float32, [None, 1])
+    #     # 隐藏层
+    #     w1 = tf.Variable(tf.random_uniform([1, 10], 0, 1))
+    #     b1 = tf.Variable(tf.zeros([1, 10]))
+    #     wb1 = tf.matmul(x, w1) + b1
+    #     layer1 = tf.nn.relu(wb1)
+    #     # 输出层
+    #     w2 = tf.Variable(tf.random_uniform([10, 1], 0, 1))
+    #     b2 = tf.Variable(tf.zeros([sampleSize, 1]))
+    #     wb2 = tf.matmul(layer1, w2) + b2
+    #     # layer2 = tf.nn.relu(wb2)
+    #     layer2 = wb2
+    #     # 梯度下降
+    #     loss = tf.reduce_mean(tf.square(y - layer2)) # 方差
+    #     train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+    #     with tf.Session() as session:
+    #         session.run(tf.global_variables_initializer())
+    #         iteration = 1
+    #         error = 1
+    #         progress = 0
+    #         # while any([iteration <= maxIteration, error > targetError]):
+    #         while iteration <= maxIteration:
+    #             session.run(train_step, feed_dict={x:sampleTimeMat, y:sampleValueMat})
+    #             # error = tf.sqrt(session.run(loss, feed_dict={x:sampleTimeMat, y:sampleValueMat})) # 由于归一化处理，误差为介于[0, 1]之间的小数
+    #             currentProgress = round(iteration / maxIteration * 100, 2)
+    #             if currentProgress != progress:
+    #                 progress = currentProgress
+    #                 self.__printInfo("Progress: {:.2f}%".format(progress))
+    #             iteration += 1
+    #         print("iteration:", iteration, "\nerror:", error)
+    #         predictValueMat = session.run(layer2, feed_dict={x:predictTimeMat})
+    #         predictValueMat = predictValueMat * sampleValueMat_range + sampleValueMat_mean
+    #         # predictValueMat = predictValueMat * sampleValueMat_range
+    #     self.predictResult = predictValueMat.transpose()[0]
+    #     return self.predictResult.copy()
 
     ## 内部计算过程
     # 周期提取函数
-    def __extractPeriod(self, samplingFrequency=1):
+    def _extractPeriod(self, samplingFrequency=1):
         """
         根据时间序列求取周期
 
@@ -207,9 +216,10 @@ class TimeSeriesPredictor(object):
             用于进行周期单位换算的可选参数，默认为1
         :return: none
         """
+        timeSeries = self._relativeTimeSeries.to_numpy()
         ## 第一部分：FFT处理时间序列，计算幅谱图中的幅值和频率
-        N = len(self.timeSeries)  # 采样点数
-        amplitudes = abs(fft(self.timeSeries))
+        N = len(timeSeries)  # 采样点数
+        amplitudes = abs(fft(timeSeries))
         # 双边幅谱取一半处理
         amplitudes = amplitudes[0: math.ceil(N / 2)]
         # 计算幅值
@@ -256,23 +266,23 @@ class TimeSeriesPredictor(object):
         self.periodExtractDetails["resultAmplitudes"] = np.array(decomposed_amplitudes)[sorted_indexes][periodFilter]
 
     # 季节性预测函数
-    def __seasonalPredict(self):
+    def _seasonalPredict(self):
         # 根据往期值预测未来一周期的值
         futureCycle = pd.Series([], dtype='float64')  # type: pd.Series
         for i in range(self.period):
-            # 获取所有往期对应值，求众数，作为周期中该时刻预测依据
-            pastValues = self.decomposeResult.seasonal[-1 - i:0:-self.period]
-            mode = stats.mode(pastValues)[0][0]
-            futureCycle = futureCycle.append(pd.Series(mode, dtype='float64'), ignore_index=True)
+            # 获取所有往期对应值，去除异常值并求平均，作为周期中该时刻预测依据
+            pastValues = self.decomposeResult.seasonal[-1 - i:0:-self.period] # type: np.ndarray
+            avg = np.array(handle_exp.remove_Outranges(pastValues.tolist())).mean()
+            futureCycle = futureCycle.append(pd.Series(avg, dtype='float64'), ignore_index=True)
         # print(futureCycle)
         # 对未来一周期的值进行重复，并补齐余数部分，获得完整的季节性预测结果
         futureSeasonal = pd.Series(futureCycle.to_list() * (self.predictNum // self.period), name="seasonal",
                                    dtype='float64')
         futureSeasonal = futureSeasonal.append(futureCycle[0: self.predictNum % self.period], ignore_index=True)
-        self.seasonalPredictResult = futureSeasonal
+        self.seasonalPredictResult = self.__assembleFutureSeries(self.decomposeResult.seasonal, futureSeasonal)
 
     # 整合各部分预测结果
-    def __composeTrendAndSeasonal(self):
+    def _composeTrendAndSeasonal(self):
         self.predictResult = self.trendPredictResult + self.seasonalPredictResult  # type: pd.Series
 
     ## 外部计算过程
@@ -307,24 +317,25 @@ class TimeSeriesPredictor(object):
     # 趋势预测函数
     # 注：各个趋势预测函数需要具有相同的参数和返回值
     @classmethod
-    def polyFitTrendPredict(cls, knownTrend, predictNum, degree=3):
+    def polyFitTrendPredict(cls, knownTrend: pd.Series, predictNum, degree=3):
         """
         多项式拟合预测
 
-        :param existingTrend: pandas.Series，numpy.ndarray或者列表
+        :param knownTrend: pandas.Series
             时间序列分解得到的趋势部分
         :param predictNum: 整数
             需要预测多少个未来值
         :return: pandas.Series
             这个分解部分的预测结果。未来趋势/周期性的时间序列
         """
-        x = np.array(range(len(knownTrend)))
-        y = knownTrend
+        knownLen = len(knownTrend)
+        x = np.array(range(knownLen))
+        y = knownTrend.to_numpy()
         params = np.polyfit(x, y, degree)
         params_func = np.poly1d(params)
-        x_predict = np.array(range(len(knownTrend), len(knownTrend) + predictNum))
-        y_predict = pd.Series([params_func(i) for i in x_predict])
-        return y_predict
+        future_x = np.array(range(knownLen, knownLen + predictNum))
+        future_y = np.array([params_func(i) for i in future_x])
+        return cls.__assembleFutureSeries(knownTrend, future_y)
 
     ## 作图
     # 显示所有已经绘制的图像
@@ -333,18 +344,18 @@ class TimeSeriesPredictor(object):
 
     # 被绘制函数调用，按照对应属性控制是否立即显示图像
     def __displayCurrentDrawing(self):
-        if self.__drawingsAutoDisplay:
+        if self._drawingsAutoDisplay:
             plt.show()
 
     def __saveDrawing(self, text):
-        if self.__saveDrawings:
+        if self._saveDrawings:
             plt.savefig("{}_{}.png".format(self.__class__.__name__, text))
 
     # 周期提取图
     def drawPeriodExtractDetails(self):
         plt.figure()
         plt.title("PeriodExtractDetail (Result: {})".format(self.period))
-        inputCurve = plt.plot(self.timeSeries)[0]
+        inputCurve = plt.plot(self._relativeTimeSeries)[0]
         frequenciesCurve = plt.plot(self.periodExtractDetails["frequencies"], color="red")[0]
         amplitudesCurve = plt.plot(self.periodExtractDetails["amplitudes"], color="orange")[0]
         plt.legend(handles=[inputCurve, frequenciesCurve, amplitudesCurve],
@@ -361,19 +372,13 @@ class TimeSeriesPredictor(object):
         self.__displayCurrentDrawing()
 
     # 绘制已知曲线和预测曲线
-    def __drawKnownAndFutureValues(self, title, knownValues, futureValues):
+    def __drawKnownAndFutureValues(self, title, knownSeries: pd.Series, futureSeries: pd.Series):
         plt.figure()
         plt.title(title)
         plt.xlabel("Time")
         plt.ylabel("Value")
-        knownLen = len(knownValues)
-        # 这两处转换为numpy ndarray是为了避免numpy future warning告警
-        if not isinstance(knownValues, np.ndarray):
-            knownValues = knownValues.to_numpy()
-        if not isinstance(futureValues, np.ndarray):
-            futureValues = futureValues.to_numpy()
-        plt.plot(range(knownLen), knownValues)
-        plt.plot(range(knownLen, knownLen + len(futureValues)), futureValues, "--")
+        plt.plot(knownSeries)
+        plt.plot(futureSeries, "--")
         self.__saveDrawing(title)
         self.__displayCurrentDrawing()
 
@@ -388,21 +393,21 @@ class TimeSeriesPredictor(object):
 
     # 最终预测图
     def drawPredictResult(self):
-        self.__drawKnownAndFutureValues("PredictResult", self.timeSeries, self.predictResult)
+        self.__drawKnownAndFutureValues("PredictResult", self._relativeTimeSeries, self.predictResult)
 
     ## 检验
     # 交叉验证的预测步骤
-    def validate_predict(self, trainingPercent=0.7, *args, **kwargs):
+    def validate_predict(self, trainingPercent=0.7):
         # 划分样本集和测试集
-        totalNum = len(self.timeSeries)
+        totalNum = len(self._relativeTimeSeries)
         trainingNum = round(totalNum * trainingPercent)
-        trainingSeries = self.timeSeries[0:trainingNum]
-        actualSeries = self.timeSeries[trainingNum:]
+        trainingSeries = self._relativeTimeSeries[0:trainingNum]
+        actualSeries = self._relativeTimeSeries[trainingNum:]
         # 对样本进行验证
         validatePredictor = TimeSeriesPredictor(trainingSeries, totalNum - trainingNum)
         validatePredictor.setPredictOptions(**self.getPredictOptions())
         validatePredictor.setUserOptions(**self.getUserOptions())
-        validateResult = validatePredictor.predict(*args, **kwargs)
+        validateResult = validatePredictor.predict()
         # 数据保存
         self.validate_predictor = validatePredictor
         self.validate_actualSeries = actualSeries
@@ -425,7 +430,7 @@ class TimeSeriesPredictor(object):
             self.__printWarning("One or more actual values equal 0. APE can't be calculated.")
             return
         ape = (self.validate_predictor.predictResult - self.validate_actualSeries) / self.validate_actualSeries * 100
-        if self.__printResult:
+        if self._printResult:
             self.__printDebug("APE of the validation result: {}".format(ape))
         self.validate_ape = ape
         return ape
@@ -440,9 +445,9 @@ class TimeSeriesPredictor(object):
         if 0 in self.validate_actualSeries:
             self.__printWarning("One or more actual values equal 0. MAPE can't be calculated.")
             return
-        self.validate_calculateApe()
+        self.validate_calculateApe() # 强制更新APE结果
         mape = np.mean(np.abs(self.validate_ape))
-        if self.__printResult:
+        if self._printResult:
             self.__printDebug("MAPE of the validation result: {:.2f}%".format(mape))
         self.validate_mape = mape
         return mape
@@ -456,21 +461,12 @@ class TimeSeriesPredictor(object):
             return
         title = "ValidationResult"
         plt.figure()
-        if not hasattr(self, "validate_mape"):
-            self.validate_calculateMape()
+        self.validate_calculateMape() # 强制更新MAPE结果
         plt.title("{} (MAPE: {:.2f}%)".format(title, self.validate_mape))
         plt.xlabel("Time")
         plt.ylabel("Value")
-        timeSeries = self.timeSeries
-        predictSeries = self.validate_predictor.predictResult
-        if not isinstance(timeSeries, np.ndarray):
-            timeSeries = timeSeries.to_numpy()
-        if not isinstance(predictSeries, np.ndarray):
-            predictSeries = predictSeries.to_numpy()
-        trainingLen = len(self.validate_predictor.timeSeries)
-        totalLen = len(self.timeSeries)
-        plt.plot(range(totalLen), timeSeries)
-        plt.plot(range(trainingLen, totalLen), predictSeries, "--")
+        plt.plot(self._relativeTimeSeries)
+        plt.plot(self.validate_predictor.predictResult, "--")
         self.__saveDrawing(title)
         self.__displayCurrentDrawing()
 
@@ -489,33 +485,24 @@ class TimeSeriesPredictor(object):
                                                                                self.validate_drawErrorDistribution.__name__))
             return
         title = "ErrorDistribution"
-        if not hasattr(self, "validate_mape"):
-            self.validate_calculateMape()
-        timeSeries = self.timeSeries
-        predictSeries = self.validate_predictor.predictResult
-        if not isinstance(timeSeries, np.ndarray):
-            timeSeries = timeSeries.to_numpy()
-        if not isinstance(predictSeries, np.ndarray):
-            predictSeries = predictSeries.to_numpy()
-        trainingLen = len(self.validate_predictor.timeSeries)
-        totalLen = len(self.timeSeries)
+        self.validate_calculateMape() # 强制更新MAPE结果
         plt.subplots(2, 1)
         # 子图1：已知曲线和预测曲线对比
         plt.subplot(2, 1, 1)
         plt.title("{} (MAPE: {:.2f}%)".format(title, self.validate_mape))
         plt.ylabel("Value")
         if foucusOnPrediction:
-            plt.plot(range(trainingLen, totalLen), timeSeries[trainingLen:])
+            plt.plot(self.validate_actualSeries)
         else:
-            plt.plot(range(totalLen), timeSeries)
-        plt.plot(range(trainingLen, totalLen), predictSeries, "--")
+            plt.plot(self._relativeTimeSeries)
+        plt.plot(self.validate_predictor.predictResult, "--")
         xlim = plt.xlim()
         # 子图2：各点APE值
         plt.subplot(2, 1, 2)
         plt.xlabel("Time")
         plt.ylabel("APE (%)")
         plt.xlim(xlim)
-        plt.bar(range(trainingLen, totalLen), self.validate_ape)
+        plt.bar(self.validate_ape.index, self.validate_ape) # bar函数需要2个参数
         self.__saveDrawing(title)
         self.__displayCurrentDrawing()
 
@@ -523,51 +510,59 @@ class TimeSeriesPredictor(object):
     # 设置预测选项
     def setPredictOptions(self, decomposeFunction=None, trendPredictFunction=None, trendPredictDegree=3):
         if not decomposeFunction:
-            self.__decomposeFunction = self.stlDecomposition
+            self._decomposeFunction = self.stlDecomposition
         if not trendPredictFunction:
-            self.__trendPredictFunction = self.polyFitTrendPredict
-        self.__trendPredictDegree = trendPredictDegree
+            self._trendPredictFunction = self.polyFitTrendPredict
+        self._trendPredictDegree = trendPredictDegree
 
     # 获取预测选项
     def getPredictOptions(self):
         predictOptionsDict = {}
-        predictOptionsDict["decomposeFunction"] = self.__decomposeFunction
-        predictOptionsDict["trendPredictFunction"] = self.__trendPredictFunction
-        predictOptionsDict["trendPredictDegree"] = self.__trendPredictDegree
+        predictOptionsDict["decomposeFunction"] = self._decomposeFunction
+        predictOptionsDict["trendPredictFunction"] = self._trendPredictFunction
+        predictOptionsDict["trendPredictDegree"] = self._trendPredictDegree
         return predictOptionsDict
 
     # 设置用户选项
     def setUserOptions(self, drawingsAutoDisplay=True, saveDrawings=False, printResult=False):
-        self.__drawingsAutoDisplay = drawingsAutoDisplay
-        self.__saveDrawings = saveDrawings
-        self.__printResult = printResult
+        self._drawingsAutoDisplay = drawingsAutoDisplay
+        self._saveDrawings = saveDrawings
+        self._printResult = printResult
 
     # 获取用户选项
     def getUserOptions(self):
         userOptionsDict = {}
-        userOptionsDict["drawingsAutoDisplay"] = self.__drawingsAutoDisplay
-        userOptionsDict["saveDrawings"] = self.__saveDrawings
-        userOptionsDict["printResult"] = self.__printResult
+        userOptionsDict["drawingsAutoDisplay"] = self._drawingsAutoDisplay
+        userOptionsDict["saveDrawings"] = self._saveDrawings
+        userOptionsDict["printResult"] = self._printResult
         return userOptionsDict
 
     ## 内部工具
-    # 时间序列转换为numpy.ndarray对象
-    def __convertTimeSeriesToNumpyNdarray(self):
+    # 时间序列预处理
+    def __initializeTimeSeries(self):
         """
-        将时间序列转换为numpy.ndarray对象支持部分处理函数
-        注：不能使用列表，STL函数不支持列表
-        注：不能直接转换为pandas.Series对象，因为会导致周期解析函数不支持
+        时间序列预处理：
+        1.将时间序列转换为pandas.Series对象
+        2.为时间序列生成相对的index
+        3.强制指定dtype为‘float64’以避免当传入的时间序列dtype为'object'时导致绘图坐标非常密集的问题
+        注：这里不对pandas.Series的index进行处理，处理过程交给绘图函数
+        注：周期解析函数不支持pandas.Series，因此在该函数中会适配为numpy.ndarray
 
         :return:
         """
-        if isinstance(self.timeSeries, pd.Series) or isinstance(self.timeSeries, np.ndarray):
+        relativeIndex = pd.RangeIndex(start=0, stop=len(self.timeSeries), step=1)
+        if isinstance(self.timeSeries, pd.Series):
+            self._relativeTimeSeries = pd.Series(self.timeSeries.to_numpy(), index=relativeIndex, dtype='float64')
+            return
+        elif isinstance(self.timeSeries, np.ndarray):
+            self._relativeTimeSeries = pd.Series(self.timeSeries, index=relativeIndex, dtype='float64')
             return
         elif isinstance(self.timeSeries, list):
-            self.timeSeries = np.array(self.timeSeries, dtype=np.float64)
+            self._relativeTimeSeries = pd.Series(self.timeSeries, index=relativeIndex, dtype='float64')
             return
         else:
             self.__printWarning(
-                "The type of timeSeries is not numpy.ndarray, pandas.Series or list. Some functions might not support!")
+                "The type of timeSeries is not pandas.Series, numpy.ndarray or list. Some functions might not support!")
 
     # 打印警告
     def __printWarning(self, warningInfo):
@@ -596,92 +591,124 @@ class TimeSeriesPredictor(object):
                                                                                    sys._getframe(2).f_code.co_name))
         print("{}".format(debugInfo))
 
+    ## 外部工具
+    # 组装预测的时间序列
+    @classmethod
+    def __assembleFutureSeries(cls, knownSeries: pd.Series, futureValues) -> pd.Series:
+        """
+        根据原时间序列和预测值，组装预测的时间序列
 
-## ---- Get the input ----
-# input = pd.read_excel(r"testData1 - seasonal.xlsx")["value"] # 注意：这里需要转化为一维数组然后传进FFT函数，否则会出现问题
-# input = pd.read_excel(r"testData2 - seasonal with trend.xlsx")["value"]
-# input = pd.read_excel(r"testData3 - seasonal with trend, with abnormal values.xlsx")["value"]
-# input = [math.sin(x) for x in range(100)]
-# input = [1 + 5 * math.sin(2 * math.pi * 200 * x) + 7 * math.sin(2 * math.pi * 400 * x) + 3 * math.sin(2 * np.pi * 600 * x) for x in np.linspace(0, 1, num=1400)]
-# input = [math.sin(2 * math.pi * 0.25 * x) for x in range(100)] # 周期为4的正弦曲线
-# input = [math.sin(x) + x for x in range(100)]
-# 完美世界(002624)2021数据
-with open("cn_002624_2021.json", "rt") as f:
-    historyQueryList = json.load(f)[0]["hq"]
-input = [i[2] for i in historyQueryList]
-# input = [x ** 2 + 200 * math.sin(2 * math.pi * 0.25 * x) for x in range(200)]
-# input = [x ** 2 for x in range(200)]
-# input = [x ** 2 + 2 for x in range(200)]
-# input = [4 * x + 3 + 2 * math.sin(2 * math.pi * 0.25 * x) for x in range(100)]
-# input = [0 for i in range(200)]
+        :param knownSeries: pandas.Series
+            原时间序列
+        :param futureValues: pandas.Series, numpy.ndarray或者列表
+            没有指定index的未来值序列
+        :return: pandas.Series
+            组装了index的未来时间序列
+        """
+        knownLen = len(knownSeries)
+        futureSeries = knownSeries.append(pd.Series(futureValues), ignore_index=True)[knownLen:]
+        return futureSeries
 
-# debug
-# input = pd.read_excel(r"debugData1 - trend.xlsx")["value"]
-# input = [i for i in range(6)]
-# timeSeriesPredictor1 = TimeSeriesPredictor(input, 8)
-# input = [i for i in range(1000)]
-# input = [i for i in range(1000)] + [1000 - i for i in range(1000)]
+if __name__ == '__main__':
+    ## ---- Get the input ----
+    # input = pd.read_excel(r"testData1 - seasonal.xlsx")["value"] # 注意：这里需要转化为一维数组然后传进FFT函数，否则会出现问题
+    # input = pd.read_excel(r"testData2 - seasonal with trend.xlsx")["value"]
+    # input = pd.read_excel(r"testData3 - seasonal with trend, with abnormal values.xlsx")["value"]
+    # input = [math.sin(x) for x in range(100)]
+    # input = [1 + 5 * math.sin(2 * math.pi * 200 * x) + 7 * math.sin(2 * math.pi * 400 * x) + 3 * math.sin(2 * np.pi * 600 * x) for x in np.linspace(0, 1, num=1400)]
+    # input = [math.sin(2 * math.pi * 0.25 * x) for x in range(100)] # 周期为4的正弦曲线
+    # input = [math.sin(x) + x for x in range(100)]
+    # 完美世界(002624)2021数据
+    with open("cn_002624_2021.json", "rt") as f:
+        historyQueryList = json.load(f)[0]["hq"]
+    # input = [i[2] for i in historyQueryList]
+    input = pd.Series([i[2] for i in historyQueryList], index=pd.to_datetime([i[0] for i in historyQueryList]))
+    # input = [x ** 2 + 200 * math.sin(2 * math.pi * 0.25 * x) for x in range(200)]
+    # input = [x ** 2 for x in range(200)]
+    # input = [x ** 2 + 2 for x in range(200)]
+    # input = [4 * x + 3 + 2 * math.sin(2 * math.pi * 0.25 * x) for x in range(100)]
+    # input = [0 for i in range(200)]
 
-## ---- Generate the output ----
+    # debug
+    # input = pd.read_excel(r"debugData1 - trend.xlsx")["value"]
+    # input = [i for i in range(6)]
+    # timeSeriesPredictor1 = TimeSeriesPredictor(input, 8)
+    # input = [i for i in range(1000)]
+    # input = [i for i in range(1000)] + [1000 - i for i in range(1000)]
+    # input = pd.Series([1, 2, 4, 5], index=pd.date_range(start="2022-05-29", freq="2D", periods=4))
+    # print(input)
 
-# timeSeriesPredictor1 = TimeSeriesPredictor(input)
-# timeSeriesPredictor1 = TimeSeriesPredictor(input, len(input))
-# timeSeriesPredictor1.predict(decomposeFunction=TimeSeriesPredictor.classicalDecomposition)
-# timeSeriesPredictor1.predict(decomposeFunction=TimeSeriesPredictor.stlDecomposition)
-# timeSeriesPredictor1.setPredictOptions(trendPredictDegree=2)
-# timeSeriesPredictor1.setUserOptions(drawingsAutoDisplay=False, saveDrawings=True, printResult=False)
-# timeSeriesPredictor1.predict()
-# timeSeriesPredictor1.validate_predict()
+    ## ---- Generate the output ----
 
+    timeSeriesPredictor1 = TimeSeriesPredictor(input)
+    # timeSeriesPredictor1 = TimeSeriesPredictor(input, len(input))
+    # timeSeriesPredictor1.predict(decomposeFunction=TimeSeriesPredictor.classicalDecomposition)
+    # timeSeriesPredictor1.predict(decomposeFunction=TimeSeriesPredictor.stlDecomposition)
+    # timeSeriesPredictor1.setPredictOptions(trendPredictDegree=2)
+    timeSeriesPredictor1.setUserOptions(drawingsAutoDisplay=False, saveDrawings=True, printResult=False)
+    # timeSeriesPredictor1.predict()
+    timeSeriesPredictor1.validate_predict()
 
-## ---- Debug ----
-# print(timeSeriesPredictor1.period)
-# TimeSeriesPredictor.classicalDecomposition(timeSeriesPredictor1.timeSeries, timeSeriesPredictor1.period).plot()
-# TimeSeriesPredictor.classicalDecomposition(timeSeriesPredictor1.timeSeries, 3.5).plot() # 时间序列分解函数不支持整数
-# print(TimeSeriesPredictor.stlDecomposition(timeSeriesPredictor1.timeSeries, timeSeriesPredictor1.period))
-# plt.show()
-# timeSeriesPredictor1.drawDecomposeResult()
-# print(timeSeriesPredictor1.periodExtractDetails)
-# print(TimeSeriesPredictor.smaTrendPredict(timeSeriesPredictor1.decomposeResult.trend, 10))
-# print(timeSeriesPredictor1.decomposeResult.seasonal)
-# print(timeSeriesPredictor1.seasonalPredictResult)
-# print(timeSeriesPredictor1.period)
-# print(timeSeriesPredictor1.predict())
-# print(timeSeriesPredictor1.predictNum)
-# print(timeSeriesPredictor1.timeSeries)
-# print(len(timeSeriesPredictor1.timeSeries))
-# print("input", timeSeriesPredictor1.decomposeResult.trend)
-# print("trendPredict", timeSeriesPredictor1.trendPredictResult)
-# print(TimeSeriesPredictor.smaTrendPredict([i for i in range(6)], 6, 3))
-# print(timeSeriesPredictor1.getUserOptions())
-# print(timeSeriesPredictor1.validate_predictor.getUserOptions())
+    ## ---- Debug ----
+    # print(timeSeriesPredictor1.period)
+    # TimeSeriesPredictor.classicalDecomposition(timeSeriesPredictor1.timeSeries, timeSeriesPredictor1.period).plot()
+    # TimeSeriesPredictor.classicalDecomposition(timeSeriesPredictor1.timeSeries, 3.5).plot() # 时间序列分解函数不支持整数
+    # print(TimeSeriesPredictor.stlDecomposition(timeSeriesPredictor1.timeSeries, timeSeriesPredictor1.period))
+    # plt.show()
+    # timeSeriesPredictor1.drawDecomposeResult()
+    # print(timeSeriesPredictor1.periodExtractDetails)
+    # print(TimeSeriesPredictor.smaTrendPredict(timeSeriesPredictor1.decomposeResult.trend, 10))
+    # print(timeSeriesPredictor1.decomposeResult.seasonal)
+    # print(timeSeriesPredictor1.seasonalPredictResult)
+    # print(timeSeriesPredictor1.period)
+    # print(timeSeriesPredictor1.predict())
+    # print(timeSeriesPredictor1.predictNum)
+    # print(timeSeriesPredictor1.timeSeries)
+    # print(len(timeSeriesPredictor1.timeSeries))
+    # print("input", timeSeriesPredictor1.decomposeResult.trend)
+    # print("trendPredict", timeSeriesPredictor1.trendPredictResult)
+    # print(TimeSeriesPredictor.smaTrendPredict([i for i in range(6)], 6, 3))
+    # print(timeSeriesPredictor1.getUserOptions())
+    # print(timeSeriesPredictor1.validate_predictor.getUserOptions())
+    # ---- 临时测试ML相关代码 ----
+    # input = input[:int(len(input)/2)]
+    # if len(input) % 2 == 1:
+    #     input = input[:-1]
+    # timeSeriesPredictor1 = TimeSeriesPredictor(input)
+    # timeSeriesPredictor1.setUserOptions(drawingsAutoDisplay=False, saveDrawings=True, printResult=False)
+    # timeSeriesPredictor1.validate_predict(trainingPercent=0.5, maxIteration=10000)
+    # ----
+    # 周期提取相关
+    # print(timeSeriesPredictor1.validate_predictor.periodExtractDetails)
+    # ----
+    # print(timeSeriesPredictor1._relativeTimeSeries)
+    # print(timeSeriesPredictor1.validate_predictor.predictResult)
 
-# input = input[:int(len(input)/2)]
-if len(input) % 2 == 1:
-    input = input[:-1]
-timeSeriesPredictor1 = TimeSeriesPredictor(input)
-timeSeriesPredictor1.setUserOptions(drawingsAutoDisplay=False, saveDrawings=True, printResult=False)
-timeSeriesPredictor1.validate_predict(trainingPercent=0.5, maxIteration=10000)
+    ## ---- Print ----
+    # timeSeriesPredictor1.validate_calculateApe()
+    # timeSeriesPredictor1.validate_calculateMape()
 
-# 周期提取相关
-# print(timeSeriesPredictor1.validate_predictor.periodExtractDetails)
+    ## ---- Display ----
+    # timeSeriesPredictor1.drawPeriodExtractDetails()
+    # timeSeriesPredictor1.drawDecomposeResult()
+    # timeSeriesPredictor1.drawTrendPredictResult()
+    # timeSeriesPredictor1.drawSeasonalPredictResult()
+    # timeSeriesPredictor1.drawPredictResult()
 
-## ---- Print ----
-# timeSeriesPredictor1.validate_calculateApe()
-# timeSeriesPredictor1.validate_calculateMape()
+    # timeSeriesPredictor1.validate_drawValidationResult()
+    timeSeriesPredictor1.validate_drawErrorDistribution(foucusOnPrediction=True)
+    # timeSeriesPredictor1.validate_predictor.drawPeriodExtractDetails()
+    # timeSeriesPredictor1.validate_predictor.drawDecomposeResult()
+    # timeSeriesPredictor1.validate_predictor.drawTrendPredictResult()
+    # timeSeriesPredictor1.validate_predictor.drawSeasonalPredictResult()
+    # timeSeriesPredictor1.validate_predictor.drawPredictResult()
+    timeSeriesPredictor1.displayAllDrawings()
 
-## ---- Display ----
-# timeSeriesPredictor1.drawPeriodExtractDetails()
-# timeSeriesPredictor1.drawDecomposeResult()
-# timeSeriesPredictor1.drawTrendPredictResult()
-# timeSeriesPredictor1.drawSeasonalPredictResult()
-# timeSeriesPredictor1.drawPredictResult()
-
-timeSeriesPredictor1.validate_drawValidationResult()
-timeSeriesPredictor1.validate_drawErrorDistribution(foucusOnPrediction=True)
-# timeSeriesPredictor1.validate_predictor.drawPeriodExtractDetails()
-# timeSeriesPredictor1.validate_predictor.drawDecomposeResult()
-# timeSeriesPredictor1.validate_predictor.drawTrendPredictResult()
-# timeSeriesPredictor1.validate_predictor.drawSeasonalPredictResult()
-# timeSeriesPredictor1.validate_predictor.drawPredictResult()
-timeSeriesPredictor1.displayAllDrawings()
+    ## ---- Simple test suite ----
+    # input = [i for i in range(1000)]
+    # timeSeriesPredictor1 = TimeSeriesPredictor(input)
+    # timeSeriesPredictor1.setUserOptions(drawingsAutoDisplay=False, saveDrawings=True, printResult=False)
+    # timeSeriesPredictor1.validate_predict()
+    # timeSeriesPredictor1.validate_drawValidationResult()
+    # timeSeriesPredictor1.validate_drawErrorDistribution(foucusOnPrediction=True)
+    # timeSeriesPredictor1.displayAllDrawings()
